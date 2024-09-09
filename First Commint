@@ -1,0 +1,1340 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+from statsmodels.tsa.stattools import adfuller
+from sklearn.metrics import mean_squared_error
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.stats.diagnostic import acorr_ljungbox
+import scipy.stats as stats
+from pmdarima import auto_arima
+import statsmodels.api as sm
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+get_ipython().run_line_magic('matplotlib', 'inline')
+import warnings
+warnings.filterwarnings("ignore")
+
+# In[2]:
+
+gdData = pd.read_csv('RealGDPQuarterly.csv')
+RainData = pd.read_csv('QuarterlyRain.csv')
+
+# In[3]:
+
+gdpData = gdData[['tyear','Period','GDPat2010ConstantBasicPrices','CrudePetroleumAndNaturalGas']]
+gdpData = gdpData.rename(columns={
+    'tyear': 'Year',
+    'GDPat2010ConstantBasicPrices': 'GDP',
+    'CrudePetroleumAndNaturalGas': 'CrudeOil'})
+gdpData.head()
+
+# In[4]:
+
+RainData = RainData.dropna()
+RainData.head()
+
+# In[5]:
+
+# Merge the two datasets on Month and Year
+gdpData = pd.merge(gdpData, RainData,    on=['Period', 'Year'])
+
+# In[46]:
+
+gdpData = gdpData.dropna()
+
+# Create a dictionary to map the Period to a month
+period_to_month = {
+    "Q1": "01-01",
+    "Q2": "04-01",
+    "Q3": "07-01",
+    "Q4": "10-01"
+}
+
+# Create the date column by combining Year and Period
+gdpData['date'] = gdpData.apply(lambda row: f"{row['Year']}-{period_to_month[row['Period']]}", axis=1)
+
+# Convert the date column to datetime format
+gdpData['date'] = pd.to_datetime(gdpData['date'])
+
+gdpData.head(10)
+
+# In[47]:
+
+from pylab import rcParams
+rcParams['figure.figsize'] = 15, 7
+
+# Define the data
+
+# Create DataFrame
+df = pd.DataFrame(gdpData)
+
+# Plot transformed data
+plt.plot(df['Year_Period'], df['CrudeOil'].dropna(), label='CrudeOil')
+plt.title('CrudeOil Price')
+plt.xlabel('Time (Quarterly)')
+plt.ylabel('Prices (Naira)')
+plt.legend()
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.show()
+
+# In[48]:
+
+from pylab import rcParams
+rcParams['figure.figsize'] = 15, 7
+
+# Define the data
+
+# Create DataFrame
+df = pd.DataFrame(gdpData)
+
+plt.plot(df['Year_Period'], df['RainDta'].dropna(), label='Rain')
+plt.title('RainFall Volume')
+plt.xlabel('Time (Quarterly)')
+plt.ylabel('Volume')
+plt.legend()
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.show()
+
+# In[49]:
+
+dat2012 = df[(df['Year'] >= 2012) & (df['Year'] <= 2012)] 
+dat2012.head()
+
+# In[50]:
+
+# Plot transformed data
+plt.plot(dat2012['CrudeOil'].dropna(), label='CrudeOil')
+plt.plot(dat2012['RainDta'].dropna(), label='RainFall')
+plt.title('2012 Flood Event Impact on CrudeOil Price')
+plt.xlabel('Interval')
+plt.ylabel('Prices/Volume')
+plt.legend()
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.show()
+
+# In[51]:
+
+df['GDP'] = pd.to_numeric(df['CrudeOil'])
+
+df_sorted = df.sort_values(by=['Year', 'Period', 'CrudeOil'])
+df_sorted['Year_Month'] = df_sorted['Year'].astype(str) + '-' + df_sorted['Period'].astype(str).str.zfill(2)
+# Prepare data
+years = df_sorted['Year'].unique()
+
+# Draw Plot
+fig, axes = plt.subplots(1, 2, figsize=(20,7), dpi=80)
+sns.boxplot(x='Year', y='CrudeOil', data=df_sorted, ax=axes[0])
+sns.boxplot(x='Year', y='RainDta', data=df_sorted, ax=axes[1])
+# Set Title
+axes[0].set_title('Nigeria CrudeOil Year-wise Trend', fontsize=18); 
+axes[1].set_title('Nigeria Rainfall Year-wise Trend', fontsize=18)
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# In[52]:
+
+# method to plot correlation between two variable while computing their Correlatio coefficient along
+
+def corp(x, y_list, xlabel, ylabel_list):
+    for y, ylabel in zip(y_list, ylabel_list):
+        ccoefficient = gdpData[x].corr(gdpData[y])
+        print(f'Correlation coefficient between {xlabel} and {ylabel}:', ccoefficient.round(2))
+        
+
+# passing plot parameters and plotting chart
+x = 'CrudeOil'
+y = ['RainDta']
+xlabel = 'CrudeOil'
+ylabel_list = ['RainDta']
+corp(x,y,x,y)
+
+
+
+# In[53]:
+
+Independent_vars = ['RainDta','CrudeOil']
+correlations = gdpData[Independent_vars].corr()
+sns.heatmap(correlations, annot=True, cmap='coolwarm')
+plt.title('Correlation Heatmap of CrudOil and Rainfall')
+plt.show()
+
+# In[54]:
+
+# Calculate Z-scores
+gdpData['z_score'] = (gdpData['CrudeOil'] - gdpData['CrudeOil'].mean()) / gdpData['CrudeOil'].std()
+
+# Identify outliers
+outliers = gdpData[np.abs(gdpData['z_score']) > 3]
+
+# Remove the outliers
+Remove_Outlier = gdpData[(np.abs(gdpData['z_score']) <= 3)]
+
+# Drop the Z-score columns as they are no longer needed
+Dff_DropColumn = Remove_Outlier.drop(columns=['z_score'])
+
+# In[55]:
+
+# Create a single plot
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Scatter plot for data points
+ax.scatter(gdpData.index, gdpData['CrudeOil'], label='Data Points')
+# Scatter plot for outliers
+ax.scatter(outliers.index, outliers['CrudeOil'], color='red', label='Outliers')
+
+# Setting labels and title
+ax.set_xlabel('Index')
+ax.set_ylabel('Value')
+ax.legend()
+ax.set_title('Crude Oil Price')
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+# In[56]:
+
+# Convert to DataFrames
+df_crude_oil = pd.DataFrame(Dff_DropColumn['CrudeOil'])
+df_rain = pd.DataFrame(RainData['RainDta'])
+
+# Merge the DataFrames based on their indices
+df_merged = pd.concat([df_crude_oil, df_rain], axis=1)
+
+# In[57]:
+
+from statsmodels.tsa.stattools import grangercausalitytests
+# Perform Granger Causality Test
+max_lag = 4  # You can adjust the max lag based on your requirements
+test_result = grangercausalitytests(df_merged, max_lag, verbose=True)
+
+# Display the test results
+print(test_result)
+
+# In[58]:
+
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+result = sm.tsa.seasonal_decompose(Dff_DropColumn['CrudeOil'].dropna(), model='additive', period=12)
+# Plot the decomposed components
+fig = result.plot()
+plt.show()
+
+# In[59]:
+
+def adfuller_test(prices, title=''):
+    result=adfuller(prices)
+    adf_statistic = result[0]
+    p_value = result[1]
+    critical_values = result[4]
+    summary = {
+        'Series': title,
+        'ADF Statistic': adf_statistic,
+        'p-value': p_value,
+        'Critical Value (1%)': critical_values['1%'],
+        'Critical Value (5%)': critical_values['5%'],
+        'Critical Value (10%)': critical_values['10%']
+    }
+    return summary
+
+#df_Main = df_sorted.drop(columns=['percentChange', 'date', 'change', 'Months', 'Years', 'price'])
+# Run ADF test on each differenced series
+results = []
+results.append(adfuller_test(Dff_DropColumn['CrudeOil'], 'CrudeOil'))
+
+# Convert results to DataFrame
+adf_results_df = pd.DataFrame(results)
+
+adf_results_df
+
+# In[60]:
+
+Dff_DropColumn['CrudeOil_First_Diff'] = Dff_DropColumn['CrudeOil'].diff()
+Dff_DropColumn['CrudeOil_Second_Diff'] = Dff_DropColumn['CrudeOil_First_Diff'].diff()
+results = []
+results.append(adfuller_test(Dff_DropColumn['CrudeOil_First_Diff'].dropna(), 'CrudeOil'))
+
+# Convert results to DataFrame
+adf_results_df = pd.DataFrame(results)
+
+adf_results_df
+
+# In[61]:
+
+from statsmodels.graphics.tsaplots import plot_acf,plot_pacf
+import statsmodels.api as sm
+fig = plt.figure(figsize=(12,8))
+ax1 = fig.add_subplot(211)
+fig = sm.graphics.tsa.plot_acf(Dff_DropColumn['CrudeOil_First_Diff'].dropna(),lags=20, ax=ax1)
+ax2 = fig.add_subplot(212)
+fig = sm.graphics.tsa.plot_pacf(Dff_DropColumn['CrudeOil_First_Diff'].dropna(),lags=20,ax=ax2)
+
+# In[65]:
+
+Dff_DropColumn.head(10)
+
+# In[151]:
+
+# Split data into train and test sets
+import itertools
+import warnings
+from pmdarima import auto_arima
+CrudeData = Dff_DropColumn[['date', 'CrudeOil']].dropna()  # Drop any rows with NaN values
+CrudeData.set_index('date', inplace=True)
+size = int(len(CrudeData) * 0.70)
+train = CrudeData.iloc[:size]
+test = CrudeData.iloc[size:]
+
+# Fit the model
+model = sm.tsa.statespace.SARIMAX(train, 
+                                  order=(3,1,1), 
+                                  seasonal_order=(1,1,1,4))
+model_fit = model.fit(disp=False)
+
+# Make predictions
+predictions = model_fit.get_prediction(start=len(train), end=len(train) + len(test) - 1, dynamic=False)
+pred_mean = predictions.predicted_mean
+pred_conf = predictions.conf_int()
+
+# In[152]:
+
+# Plot forecasts against actual outcomes
+plt.figure(figsize=(12, 6))
+plt.plot(train.index, train, label='Training Data')
+plt.plot(test.index, test, label='Actual Prices')
+plt.plot(test.index, pred_mean, label='Predicted Prices', color='red')
+plt.fill_between(test.index, pred_conf.iloc[:, 0], pred_conf.iloc[:, 1], color='pink', alpha=0.3)
+plt.legend()
+plt.xlabel('Years')
+plt.ylabel('Prices (Naira)')
+plt.title('Crude Oil Price - Actual vs Predicted with Uncertainty Bands')
+plt.show()
+
+# In[157]:
+
+test
+
+# In[159]:
+
+# Plot residuals
+residuals = test['CrudeOil'] - pred_mean
+plt.figure(figsize=(10, 6))
+plt.plot(residuals)
+plt.title('Residuals')
+plt.xlabel('Years')
+plt.ylabel('Value count')
+plt.show()
+
+# In[161]:
+
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+# Calculate errors
+mae = mean_absolute_error(test['CrudeOil'], pred_mean)
+mape = np.mean(np.abs((test['CrudeOil'] - pred_mean) / test['CrudeOil'])) * 100
+rmse = np.sqrt(mean_squared_error(test['CrudeOil'], pred_mean))
+
+# Print results
+print(f'Mean Absolute Error (MAE): {mae}')
+print(f'Mean Absolute Percentage Error (MAPE): {mape}')
+print(f'Root Mean Squared Error (RMSE): {rmse}')
+
+# In[190]:
+
+# Subtract pred_mean from test
+residuals = test['CrudeOil'] - pred_mean
+
+# Convert the result back to a pandas Series
+residuals = pd.Series(residuals, index=test.index)
+ljung_box_test = sm.stats.acorr_ljungbox(residuals, lags=[10], return_df=True)
+
+print(ljung_box_test)
+
+# Histogram and QQ plot for each residual
+plt.figure(figsize=(8, 3))
+    
+plt.subplot(1, 2, 1)
+sns.histplot(residuals, kde=True)
+plt.title('Histogram of Residuals')
+    
+plt.subplot(1, 2, 2)
+stats.probplot(residuals, dist="norm", plot=plt)
+plt.title('QQ Plot of Residuals')
+    
+plt.tight_layout()
+plt.show()
+
+# In[203]:
+
+RainData = RainData.dropna()
+exog_train = RainData['RainDta'].iloc[:size]
+exog_train_lag2 = RainData['RainDta'].shift(2)
+exog_train_lag2_train = exog_train_lag2.iloc[:size]
+exog_train_lag2_train = exog_train_lag2_train.dropna()
+exog_test = RainData['RainDta'].iloc[size:]
+exog_test_Lag2 = exog_train_lag2.iloc[size:]
+exog_test_Lag2 = exog_test_Lag2.dropna()
+
+# Align the endog variable with the exog variabl
+train_aligned = train.iloc[:len(exog_train_lag2_train)]
+
+# In[204]:
+
+Exmodel = SARIMAX(train_aligned['CrudeOil'].values, 
+                exog=exog_train_lag2_train, 
+                order=(3,1,1), 
+                seasonal_order=(1,1,1,4))
+
+Exmodel_fit = Exmodel.fit(disp=False)
+
+# Make predictions
+Expredictions = Exmodel_fit.get_prediction(start=len(train_aligned['CrudeOil'].values), 
+                                           end=len(train_aligned['CrudeOil'].values) + len(test) - 1, 
+                                           exog=exog_test_Lag2, dynamic=False)
+Expred_mean = Expredictions.predicted_mean
+Expred_conf = Expredictions.conf_int()
+
+# In[205]:
+
+# Plot forecasts against actual outcomes
+plt.figure(figsize=(12, 6))
+plt.plot(train_aligned.index, train_aligned, label='Training Data')
+plt.plot(test.index, test, label='Actual Prices')
+plt.plot(test.index, Expred_mean, label='Predicted Prices', color='red')
+# Plot confidence intervals
+plt.fill_between(test.index, Expred_conf.iloc[:, 0], Expred_conf.iloc[:, 1], color='pink', alpha=0.3)
+plt.legend()
+plt.xlabel('Years')
+plt.ylabel('Prices (Naira)')
+plt.title('Crude Oil Price with Rainfall - Actual vs Predicted with Uncertainty Bands')
+plt.show()
+
+# In[206]:
+
+Expred_mean
+
+# In[211]:
+
+# Subtract pred_mean from test
+residuals = test['CrudeOil'].values - Expred_mean
+
+# Convert the result back to a pandas Series
+residuals = pd.Series(residuals.values, index=test.index)
+ljung_box_test = sm.stats.acorr_ljungbox(residuals, lags=[10], return_df=True)
+
+print(ljung_box_test)
+
+# Histogram and QQ plot for each residual
+plt.figure(figsize=(8, 3))
+    
+plt.subplot(1, 2, 1)
+sns.histplot(residuals.values, kde=True)
+plt.title('Histogram of Residuals')
+    
+plt.subplot(1, 2, 2)
+stats.probplot(residuals.values, dist="norm", plot=plt)
+plt.title('QQ Plot of Residuals')
+    
+plt.tight_layout()
+plt.show()
+
+# In[321]:
+
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+# Calculate errors
+Exmae = mean_absolute_error(test['CrudeOil'].values, Expred_mean)
+Exmape = np.mean(np.abs((test['CrudeOil'].values - Expred_mean) / test['CrudeOil'].values)) * 100
+Exrmse = np.sqrt(mean_squared_error(test['CrudeOil'].values, Expred_mean))
+
+# Print results
+print(f'Mean Absolute Error (MAE): {Exmae}')
+print(f'Mean Absolute Percentage Error (MAPE): {Exmape}')
+print(f'Root Mean Squared Error (RMSE): {Exrmse}')
+
+# In[214]:
+
+# Plot residuals
+plt.figure(figsize=(10, 6))
+plt.plot(residuals)
+plt.title('Residuals')
+plt.xlabel('Years')
+plt.ylabel('Values count')
+plt.show()
+
+# In[296]:
+
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+forecast_steps = 20
+
+# Decompose the RainData series
+decomposition = seasonal_decompose(RainData['RainDta'], model='additive', period=4)
+trend = decomposition.trend
+seasonal = decomposition.seasonal
+residual = decomposition.resid
+
+# Heavy Rainfall: Amplify the trend
+heavy_rain_trend = trend * 0.5  # Increasing the trend to simulate heavier rainfall
+
+# Forecast future values using the amplified trend and seasonal components
+trend_future = heavy_rain_trend[-12:].mean()  # Assuming the trend remains constant
+seasonal_future = seasonal[:forecast_steps]  # Assuming the seasonal pattern repeats
+
+exog_future_heavy = pd.Series(trend_future + seasonal_future.values)
+
+# In[297]:
+
+forecastmodel = SARIMAX(train_aligned['CrudeOil'].values, 
+                exog=exog_train_lag2_train, 
+                order=(1,1,1), 
+                seasonal_order=(1,1,1,4))
+
+forecastmodel_fit = forecastmodel.fit(disp=False)
+
+# Make predictions
+forecastpredictions = forecastmodel_fit.get_prediction(start=len(train_aligned['CrudeOil'].values), 
+                                                       end=len(train_aligned['CrudeOil'].values) + len(test) - 1, 
+                                                       exog=exog_test_Lag2, dynamic=False)
+forecastpred_mean = forecastpredictions.predicted_mean
+forecastpred_conf = forecastpredictions.conf_int()
+
+# In[298]:
+
+# Forecast beyond the test data
+forecast_steps = 20  # Number of steps to forecast into the future
+forecast = forecastmodel_fit.get_forecast(steps=forecast_steps, exog=exog_future_heavy)
+forecast_mean = forecast.predicted_mean
+forecast_conf = forecast.conf_int()
+
+# Combine historical data with forecasts
+full_forecast = pd.concat([forecastpred_mean, forecast_mean])
+full_conf = pd.concat([forecastpred_conf, forecast_conf])
+
+
+# In[294]:
+
+# Decompose the RainData series
+decomposition = seasonal_decompose(RainData['RainDta'], model='additive', period=4)
+trend = decomposition.trend
+seasonal = decomposition.seasonal
+residual = decomposition.resid
+
+# Heavy Rainfall: Amplify the trend
+heavy_rain_trend = trend * 4.5  # Increasing the trend to simulate heavier rainfall
+
+# Forecast future values using the amplified trend and seasonal components
+trend_future2 = heavy_rain_trend[-12:].mean()  # Assuming the trend remains constant
+seasonal_future2 = seasonal[:forecast_steps]  # Assuming the seasonal pattern repeats
+
+exog_future_heavy2 = pd.Series(trend_future2 + seasonal_future2.values)
+
+forecastmodel2 = SARIMAX(train_aligned['CrudeOil'].values, 
+                exog=exog_train_lag2_train, 
+                order=(1,1,1), 
+                seasonal_order=(1,1,1,4))
+
+forecastmodel_fit2 = forecastmodel2.fit(disp=False)
+
+# Make predictions
+forecastpredictions2 = forecastmodel_fit2.get_prediction(start=len(train_aligned['CrudeOil'].values), 
+                                                       end=len(train_aligned['CrudeOil'].values) + len(test) - 1, 
+                                                       exog=exog_test_Lag2, dynamic=False)
+forecastpred_mean2 = forecastpredictions2.predicted_mean
+forecastpred_conf2 = forecastpredictions2.conf_int()
+
+forecast2 = forecastmodel_fit2.get_forecast(steps=forecast_steps, exog=exog_future_heavy2)
+forecast_mean2 = forecast2.predicted_mean
+forecast_conf2 = forecast2.conf_int()
+
+
+# In[300]:
+
+start_date = pd.to_datetime("2024-01-01")  # Set the start date for the forecast
+forecast_dates = pd.date_range(start=start_date, periods=len(forecast_mean), freq='Q')
+forecast_dates_pred = pd.date_range(start=start_date, periods=len(forecastpred_mean), freq='Q')
+forecast_dates_conf = pd.date_range(start=start_date, periods=len(forecast_conf), freq='Q')
+
+# Update forecast_mean to have these dates as the index
+forecast_mean.index = forecast_dates
+forecastpred_mean.index = forecast_dates_pred
+forecast_conf.index = forecast_dates_conf
+
+forecast_mean2.index = forecast_dates
+forecastpred_mean2.index = forecast_dates_pred
+forecast_conf2.index = forecast_dates_conf
+
+# In[278]:
+
+# Plot the results
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12, 6))
+plt.plot(CrudeData.index, CrudeData['CrudeOil'], label='Observed')
+plt.plot(forecast_mean.index, forecast_mean.values, label='Forecast', color='red')
+plt.plot(forecastpred_mean.index, forecastpred_mean.values, label='Prediction', color='orange')
+plt.fill_between(forecast_conf.index, forecast_conf.iloc[:, 0], forecast_conf.iloc[:, 1], color='pink', alpha=0.3)
+plt.xlabel('Time')
+plt.ylabel('Crude Oil Prices (Naira)')
+plt.title('Forecasting Crude Oil Prices with Rainfall Beyond Test Data')
+plt.legend()
+plt.show()
+
+# In[279]:
+
+from sklearn.metrics import r2_score
+import numpy as np
+
+# Ensure the lengths are the same by slicing the observed data to match the forecast period
+observed_values = full_forecast.iloc[-forecast_steps:]  # This assumes full_forecast contains the true observed values
+predicted_values = forecast_mean
+
+# Calculate RMSE
+forrmse = np.sqrt(mean_squared_error(forecastpred_mean.values, forecast_mean[:-3].values))
+
+# Calculate MAE
+formae = mean_absolute_error(forecastpred_mean.values, forecast_mean[:-3].values)
+
+# Calculate MAPE
+formape = np.mean(np.abs((forecastpred_mean.values - forecast_mean[:-3].values) / forecastpred_mean.values)) * 100
+
+# Calculate R² Score
+forr2 = r2_score(forecastpred_mean.values, forecast_mean[:-3].values)
+
+# Print the results
+print(f'Root Mean Squared Error (RMSE): {forrmse}')
+print(f'Mean Absolute Error (MAE): {formae}')
+print(f'Mean Absolute Percentage Error (MAPE): {formape}')
+print(f'R² Score: {forr2}')
+
+# In[303]:
+
+forecast_mean
+
+# In[302]:
+
+# Plotting the results
+plt.figure(figsize=(10, 6))
+
+# Plot light rainfall results
+plt.plot(forecast_mean.index, forecast_mean.values, label='Light Rainfall', marker='o')
+
+# Plot heavy rainfall results
+plt.plot(forecast_mean2.index, forecast_mean2.values, label='Heavy Rainfall', marker='o')
+
+# Adding labels and title
+plt.xlabel('Time')
+plt.ylabel('Crude Oil Prices (Naira)')
+plt.title('Crude Oil Prices under Light vs Heavy Rainfall')
+plt.legend()
+plt.grid(True)
+
+# Display the plot
+plt.show()
+
+# In[88]:
+
+Dff_DropColumn.head(5)
+
+# In[305]:
+
+from prophet import Prophet
+import pandas as pd
+
+# daf should have columns: 'ds' (date), 'y' (crude oil prices), 'rainfall' (rainfall data)
+daf = Dff_DropColumn.drop(columns=['Year','Period','GDP','Year_Period','CrudeOil_First_Diff','CrudeOil_Second_Diff'])
+Maindf = daf.drop(columns=['RainDta'])
+# Rename the columns: CrudeOil to 'y' and date to 'ds'
+Maindf.rename(columns={'CrudeOil': 'y', 'date': 'ds'}, inplace=True)
+Maindf['Rainfall'] = daf['RainDta']
+
+# In[306]:
+
+Maindf.head(3)
+
+# In[307]:
+
+# Define the Prophet model
+model = Prophet(yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False)
+model.add_seasonality(name='quarterly', period=91.25, fourier_order=8)  # Adding quarterly seasonality
+model.add_regressor('Rainfall')
+
+# Fit the model
+model.fit(Maindf)
+
+# Future dataframe for forecasting
+future = model.make_future_dataframe(periods=8, freq='Q')  # Forecasting 2 years ahead (8 quarters)
+
+# In[315]:
+
+rainLen = len(future) - len(Maindf)
+exog_future = exog_future_heavy.head(rainLen)
+exog_future2 = exog_future_heavy2.head(rainLen)
+exog_future
+
+# In[316]:
+
+# Ensure the future DataFrame includes 'RainDta' for the future periods
+future['Rainfall'] = np.concatenate([Maindf['Rainfall'].values, exog_future])
+
+# Make predictions
+forecast = model.predict(future)
+
+# In[317]:
+
+# Ensure the future DataFrame includes 'RainDta' for the future periods
+future['Rainfall'] = np.concatenate([Maindf['Rainfall'].values, exog_future2])
+
+# Make predictions
+forecast2 = model.predict(future)
+
+# In[312]:
+
+# Plot the actual, predicted, and forecasted values
+plt.figure(figsize=(12, 6))
+
+# Plot actual data
+plt.plot(Maindf['ds'], Maindf['y'], label='Actual Crude Oil Prices', color='blue')
+
+# Plot predictions (including forecast)
+plt.plot(forecast['ds'], forecast['yhat'], label='Predicted/Forecasted Crude Oil Prices', color='orange')
+
+# Highlight forecasted area
+plt.axvline(x=Maindf['ds'].max(), color='red', linestyle='--', label='Forecast Start')
+
+# Adding labels and title
+plt.xlabel('Time')
+plt.ylabel('Crude Oil Prices (Naira)')
+plt.title('Actual vs Predicted and Forecasted Crude Oil Prices')
+plt.legend()
+
+# Show the plot
+plt.show()
+
+# In[320]:
+
+# Determine the point where the forecast starts
+forecast_start_date = Maindf['ds'].max()
+
+# Filter the forecast DataFrame to include only dates after the forecast start date
+light_rainfall_forecast_only = forecast[forecast['ds'] > forecast_start_date]
+heavy_rainfall_forecast_only = forecast2[forecast2['ds'] > forecast_start_date]
+
+# Plot the actual, predicted, and forecasted values
+plt.figure(figsize=(12, 6))
+
+# Plot the filtered forecast data (only the forecast starting from the red line)
+plt.plot(light_rainfall_forecast_only['ds'], light_rainfall_forecast_only['yhat'], label='Light rainfall', color='orange')
+plt.plot(heavy_rainfall_forecast_only['ds'], heavy_rainfall_forecast_only['yhat'], label='Heavy rainfall', color='blue')
+
+# Highlight forecasted area start
+plt.axvline(x=forecast_start_date, color='red', linestyle='--', label='Forecast Start')
+
+# Adding labels and title
+plt.xlabel('Time')
+plt.ylabel('Crude Oil Prices (Naira)')
+plt.title('Forecasted Crude Oil Prices with Light vs Heavy Rainfall')
+plt.legend()
+
+# Show the plot
+plt.show()
+
+# In[322]:
+
+# Merge the actual and predicted values for the historical period
+actual_vs_predicted = pd.merge(Maindf, forecast[['ds', 'yhat']], on='ds')
+
+# Calculate MAE
+mae = mean_absolute_error(actual_vs_predicted['y'], actual_vs_predicted['yhat'])
+print(f"Mean Absolute Error (MAE): {mae}")
+
+# Calculate MSE and RMSE
+mse = mean_squared_error(actual_vs_predicted['y'], actual_vs_predicted['yhat'])
+rmse = np.sqrt(mse)
+#print(f"Mean Squared Error (MSE): {mse}")
+print(f"Root Mean Squared Error (RMSE): {rmse}")
+
+# Calculate MAPE
+mape = np.mean(np.abs((actual_vs_predicted['y'] - actual_vs_predicted['yhat']) / actual_vs_predicted['y'])) * 100
+print(f"Mean Absolute Percentage Error (MAPE): {mape}%")
+
+# Calculate the square root of the sum of squared residuals
+sum_squared_residuals = np.sum((actual_vs_predicted['y'] - actual_vs_predicted['yhat']) ** 2)
+root_square_sum_squared_residuals = np.sqrt(sum_squared_residuals)
+#print(f"Root Square of Sum of Squared Residuals: {root_square_sum_squared_residuals}")
+
+# In[117]:
+
+datess = pd.date_range(start='2010-01-01', periods=12, freq='Q')  # 3 years of quarterly data
+crude_ooil = np.random.normal(1500, 100, len(datess))  # Simulated crude oil prices
+rainfalll = np.random.uniform(20, 200, len(datess))  # Simulated rainfall data
+
+# Create the DataFrame
+daaf = pd.DataFrame({
+    'ds': datess,
+    'y': crude_ooil,
+    'RainDta': rainfalll
+})
+
+daaf
+
+# In[118]:
+
+exog_future = np.random.uniform(20, 200, len(future) - len(daaf))
+
+exog_future
+
+# In[ ]:
+
+# Define the Prophet model
+model = Prophet(yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False)
+model.add_seasonality(name='quarterly', period=91.25, fourier_order=8)  # Adding quarterly seasonality
+model.add_regressor('RainDta')  # Adding RainDta as a regressor
+
+# Fit the model to the historical data
+model.fit(daaf)
+
+# Create the future dataframe for forecasting (8 quarters ahead)
+future = model.make_future_dataframe(periods=8, freq='Q')  # Forecasting 2 years ahead (8 quarters)
+
+# Generate some forecasted rainfall data for the future periods (to replace 'exog_future_heavy')
+# Here we'll just generate random values for simplicity
+
+# Ensure the future DataFrame includes 'RainDta' for the future periods
+future['RainDta'] = np.concatenate([daf['RainDta'].values, exog_future_heavy])
+
+# Make predictions
+forecast = model.predict(future)
+
+# View the forecasted values
+print(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail())
+
+# Begin US Crude oil Codebase
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+from statsmodels.tsa.stattools import adfuller
+from sklearn.metrics import mean_squared_error
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from statsmodels.tsa.api import VAR
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.stats.diagnostic import acorr_ljungbox
+import scipy.stats as stats
+from pmdarima import auto_arima
+import statsmodels.api as sm
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+get_ipython().run_line_magic('matplotlib', 'inline')
+import warnings
+warnings.filterwarnings("ignore")
+
+# In[2]:
+
+gdpData = pd.read_csv('RealGDPQuarterly.csv')
+exchangeData = pd.read_csv('QuarterlyExchangeRate.csv')
+inflationData = pd.read_csv('QuarterlyInflationRate.csv')
+RainData = pd.read_csv('Rainfall.csv')
+df = pd.read_csv('crude-oil-price.csv')
+storm = pd.read_csv('storms.csv')
+
+# In[3]:
+
+df
+
+# In[4]:
+
+# Convert the date column to proper datetime format
+df['date'] = pd.to_datetime(df['date'])
+
+# Extract the month from each date and create a new column 'Months'
+df['Months'] = df['date'].dt.month
+df['Years'] = df['date'].dt.year
+
+# In[5]:
+
+df
+
+# In[6]:
+
+dataYear = df[(df['Years'] >= 2000) & (df['Years'] <= 2023)] 
+dataYear.head(10)
+
+# In[7]:
+
+gf = pd.DataFrame(dataYear)
+
+gf['Price'] = pd.to_numeric(gf['price'])
+
+# Sorting the DataFrame by 'Year' and then by 'Month'
+df_sorted = gf.sort_values(by=['Years', 'Months', 'price'])
+
+# Creating a new x-axis based on year with small offsets for each month
+df_sorted['Year_Month'] = df_sorted['Years'] + (df_sorted['Months'] - 1) / 12
+
+# Define 23 colors
+colors = [
+    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', 
+    '#7f7f7f', '#bcbd22', '#17becf', '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', 
+    '#c5b0d5', '#c49c94', '#000000', '#c7c7c7', '#dbdb8d', '#9edae5', '#393b79', 
+    '#637939', '#8c6d31','#51ee10'
+]
+
+# Plotting the data
+plt.figure(figsize=(14, 8))
+
+# Plot each year separately to create labels for the legend
+for i, year in enumerate(df_sorted['Years'].unique()):
+    yearly_data = df_sorted[df_sorted['Years'] == year]
+    plt.plot(yearly_data['Year_Month'], yearly_data['price'], marker='o', linestyle='-', label=str(year), color=colors[i % len(colors)])
+
+# Customizing the x-axis to show years as major ticks
+years = df_sorted['Years'].unique()
+plt.xticks(ticks=years, labels=years)
+
+plt.xlabel('Year')
+plt.ylabel('Price (Dollar)')
+plt.title('USA Monthly Crude Oil Price Time Series')
+plt.legend(title='Year', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# In[8]:
+
+dat2002 = df[(df['Years'] == 2001)] 
+
+# In[9]:
+
+dataYear2 = pd.DataFrame(dat2002)
+
+# Merge columns
+dataYear2['Year_Month'] = dataYear2['Years'].astype(str) + '-' + dataYear2['Months'].astype(str)
+
+# Plotting
+plt.figure(figsize=(12, 6))
+plt.plot(dataYear2['Year_Month'], dataYear2['price'], marker='', linestyle='-')
+plt.title('Impact of 2001 Windspeed on Crude Oil Price in the US')
+plt.xlabel('Monthly')
+plt.ylabel('Price')
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# In[10]:
+
+dat2008 = df[(df['Years'] >= 2004) & (df['Years'] <= 2008)] 
+
+# In[11]:
+
+dataYear3 = pd.DataFrame(dat2008)
+
+# Merge columns
+dataYear3['Year_Month'] = dataYear3['Years'].astype(str) + '-' + dataYear3['Months'].astype(str)
+
+# Plotting
+plt.figure(figsize=(12, 6))
+plt.plot(dataYear3['Year_Month'], dataYear3['price'], marker='', linestyle='-')
+plt.title('Impact of Windspeed (Hurricane/Storm) on Crude Oil Price from Jan 2004 - May 2008')
+plt.xlabel('Monthly')
+plt.ylabel('Price')
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# In[12]:
+
+dat2008_2 = df[(df['Years'] == 2005)] 
+
+# In[13]:
+
+dataYear2 = pd.DataFrame(dat2008_2)
+
+# Merge columns
+dataYear2['Year_Month'] = dataYear2['Years'].astype(str) + '-' + dataYear2['Months'].astype(str)
+
+# Plotting
+plt.figure(figsize=(12, 6))
+plt.plot(dataYear2['Year_Month'], dataYear2['price'], marker='', linestyle='-')
+plt.title('Sharp Fall of Crude Oil Price June 2005 - Dec 2005')
+plt.xlabel('Monthly')
+plt.ylabel('Price')
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# In[14]:
+
+dat2011 = df[(df['Years'] >= 2009) & (df['Years'] <= 2011)] 
+
+# In[15]:
+
+dataYear4 = pd.DataFrame(dat2011)
+
+# Merge columns
+dataYear4['Year_Month'] = dataYear4['Years'].astype(str) + '-' + dataYear4['Months'].astype(str)
+
+# Plotting
+plt.figure(figsize=(12, 6))
+plt.plot(dataYear4['Year_Month'], dataYear4['price'], marker='', linestyle='-')
+plt.title('WindSpeed Impact on Crude Oil Price from Jan 2009 - April 2011')
+plt.xlabel('Monthly')
+plt.ylabel('Price')
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# In[16]:
+
+dat2022 = df[(df['Years'] >= 2022) & (df['Years'] <= 2023)] 
+
+# In[17]:
+
+dataYear4 = pd.DataFrame(dat2022)
+
+# Merge columns
+dataYear4['Year_Month'] = dataYear4['Years'].astype(str) + '-' + dataYear4['Months'].astype(str)
+
+# Plotting
+plt.figure(figsize=(12, 6))
+plt.plot(dataYear4['Year_Month'], dataYear4['price'], marker='', linestyle='-')
+plt.title('Fall of Crude Oil Price from Jan 2022 - 2023')
+plt.xlabel('Monthly')
+plt.ylabel('Price')
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# In[18]:
+
+storm2002 = storm[(storm['year'] == 2001)] 
+
+# In[19]:
+
+# Create the plot for wind time series
+plt.figure(figsize=(12, 6))
+plt.plot(storm2002['SN'], storm2002['wind'], marker='o', linestyle='-')
+plt.xlabel('Year 2001 Wind Datapoints')
+plt.xticks([])
+plt.ylabel('Wind Speed')
+plt.title('2001 Wind Speed')
+plt.grid(True)
+plt.show()
+
+# In[20]:
+
+storm2002 = storm[(storm['year'] == 2005)] 
+# Create the plot for wind time series
+plt.figure(figsize=(12, 6))
+plt.plot(storm2002['SN'], storm2002['wind'], marker='o', linestyle='-')
+plt.xlabel('Year 2005 Wind Datapoints')
+plt.xticks([])
+plt.ylabel('Wind Speed')
+plt.title('2005 Wind Speed')
+plt.grid(True)
+plt.show()
+
+# In[21]:
+
+storm2002 = storm[(storm['year'] == 2009)] 
+# Create the plot for wind time series
+plt.figure(figsize=(12, 6))
+plt.plot(storm2002['SN'], storm2002['wind'], marker='o', linestyle='-')
+plt.xlabel('Year 2009 Wind Datapoints')
+plt.xticks([])
+plt.ylabel('Wind Speed')
+plt.title('2009 Wind Speed')
+plt.grid(True)
+plt.show()
+
+# In[22]:
+
+storm2022 = storm[(storm['year'] == 2021)] 
+# Create the plot for wind time series
+plt.figure(figsize=(12, 6))
+plt.plot(storm2022['SN'], storm2022['wind'], marker='o', linestyle='-')
+plt.xlabel('Year 2021 Wind Datapoints')
+plt.xticks([])
+plt.ylabel('Wind Speed')
+plt.title('2021 Wind Speed')
+plt.grid(True)
+plt.show()
+
+# In[23]:
+
+# Calculate Z-scores
+dataYear['z_score'] = (dataYear['price'] - dataYear['price'].mean()) / dataYear['price'].std()
+
+# Identify outliers
+outliers = dataYear[np.abs(dataYear['z_score']) > 3]
+
+# Remove the outliers
+Remove_Outlier = dataYear[(np.abs(dataYear['z_score']) <= 3)]
+
+# Drop the Z-score columns as they are no longer needed
+Dff_DropColumn = Remove_Outlier.drop(columns=['z_score'])
+
+# In[24]:
+
+# Create a single plot
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Scatter plot for data points
+ax.scatter(dataYear.index, dataYear['price'], label='Data Points')
+# Scatter plot for outliers
+ax.scatter(outliers.index, outliers['price'], color='red', label='Outliers')
+
+# Setting labels and title
+ax.set_xlabel('Index')
+ax.set_ylabel('Value')
+ax.legend()
+ax.set_title('Crude Oil Price')
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+
+# In[25]:
+
+dataYear['price'] = pd.to_numeric(dataYear['price'])
+
+# Sorting the DataFrame by 'Year' and then by 'Month'
+df_sorted = dataYear.sort_values(by=['Years', 'Months', 'price'])
+
+# Creating a 'Year_Month' column for easier plotting
+df_sorted['Year_Month'] = df_sorted['Years'].astype(str) + '-' + df_sorted['Months'].astype(str).str.zfill(2)
+
+
+# Prepare data
+years = df_sorted['Years'].unique()
+
+# Draw Plot
+fig, axes = plt.subplots(1, 2, figsize=(20,7), dpi=80)
+sns.boxplot(x='Years', y='price', data=df_sorted, ax=axes[0])
+sns.boxplot(x='Months', y='price', data=df_sorted.loc[~df_sorted.Years.isin([2000, 2023]), :])
+
+# Set Title
+axes[0].set_title('Year-wise Box Plot\n(The Trend)', fontsize=18); 
+axes[1].set_title('Month-wise Box Plot\n(The Seasonality)', fontsize=18)
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# In[26]:
+
+df_sorted = Dff_DropColumn.dropna()
+df_sorted
+
+# In[ ]:
+
+
+
+
+# In[27]:
+
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+result = sm.tsa.seasonal_decompose(df_sorted['Price'].dropna(), model='additive', period=12)
+# Plot the decomposed components
+fig = result.plot()
+plt.show()
+
+# In[28]:
+
+def adfuller_test(prices, title=''):
+    result=adfuller(prices)
+    adf_statistic = result[0]
+    p_value = result[1]
+    critical_values = result[4]
+    summary = {
+        'Series': title,
+        'ADF Statistic': adf_statistic,
+        'p-value': p_value,
+        'Critical Value (1%)': critical_values['1%'],
+        'Critical Value (5%)': critical_values['5%'],
+        'Critical Value (10%)': critical_values['10%']
+    }
+    return summary
+
+df_Main = df_sorted.drop(columns=['percentChange', 'date', 'change', 'Months', 'Years', 'price'])
+# Run ADF test on each differenced series
+results = []
+results.append(adfuller_test(df_sorted['price'], 'Price'))
+
+# Convert results to DataFrame
+adf_results_df = pd.DataFrame(results)
+
+adf_results_df
+
+# In[29]:
+
+df_sorted['CrudeOil_First_Diff'] = df_sorted['price'].diff()
+
+# In[30]:
+
+df_sorted = df_sorted.drop(columns=['percentChange', 'date', 'change', 'Months', 'Years', 'price'])
+df_sorted = df_sorted.dropna()
+
+# In[31]:
+
+# Run ADF test on each differenced series
+results = []
+results.append(adfuller_test(df_sorted['CrudeOil_First_Diff'], 'CrudeOil_First_Diff'))
+
+# Convert results to DataFrame
+adf_results_df = pd.DataFrame(results)
+
+adf_results_df
+
+# In[32]:
+
+Rainfall = RainData.dropna()
+Rainfadata = pd.melt(Rainfall, id_vars=['Month'], var_name='Year', value_name='Rainfall')
+Rainfadata
+
+# In[33]:
+
+# Replace the month names with numbers
+Rainfadata['Month'] = Rainfadata['Month'].astype(str).str.strip()
+Rainfadata['Year'] = Rainfadata['Year'].astype(str)
+
+# Create a dictionary to map month names to numbers
+month_mapping = {
+    'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+    'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+}
+
+# Replace the month names with numbers
+Rainfadata['Month'] = Rainfadata['Month'].map(month_mapping)
+
+# Sorting the DataFrame by 'Year' and then by 'Month'
+Raindat = Rainfadata.sort_values(by=['Year', 'Month', 'Rainfall'])
+
+# Convert Year to numeric type
+Raindat['Year'] = Raindat['Year'].astype(int)
+
+# Creating a new x-axis based on year with small offsets for each month
+Raindat['Year_Month'] = Raindat['Year'] + (Raindat['Month'] - 1) / 12
+
+Raindat
+
+# In[34]:
+
+from statsmodels.graphics.tsaplots import plot_acf,plot_pacf
+import statsmodels.api as sm
+fig = plt.figure(figsize=(12,8))
+ax1 = fig.add_subplot(211)
+fig = sm.graphics.tsa.plot_acf(df_sorted['CrudeOil_First_Diff'].dropna(),lags=20, ax=ax1)
+ax2 = fig.add_subplot(212)
+fig = sm.graphics.tsa.plot_pacf(df_sorted['CrudeOil_First_Diff'].dropna(),lags=20,ax=ax2)
+
+# In[35]:
+
+from statsmodels.graphics.tsaplots import plot_acf,plot_pacf
+import statsmodels.api as sm
+fig = plt.figure(figsize=(12,8))
+ax1 = fig.add_subplot(211)
+fig = sm.graphics.tsa.plot_acf(df_sorted['Price'].dropna(),lags=20, ax=ax1)
+ax2 = fig.add_subplot(212)
+fig = sm.graphics.tsa.plot_pacf(df_sorted['Price'].dropna(),lags=20,ax=ax2)
+
+# In[138]:
+
+# Split data into train and test sets
+import itertools
+import warnings
+from pmdarima import auto_arima
+US_Data = df_sorted['Price'].dropna()
+size = int(len(US_Data) * 0.70)
+train, test = US_Data[0:size], US_Data[size:len(US_Data)]
+
+# Fit the model
+model = sm.tsa.ARIMA(train, order=(10,2,10))
+model_fit = model.fit()
+
+# Make predictions
+y_pred = model_fit.get_forecast(len(test.index))
+y_pred_df = y_pred.conf_int(alpha = 0.05) 
+y_pred_df["Predictions"] = model_fit.predict(start = y_pred_df.index[0], end = y_pred_df.index[-1])
+y_pred_df.index = test.index
+y_pred_out = y_pred_df["Predictions"] 
+
+# Make predictions
+predictions = model_fit.get_prediction(start=len(train), end=len(train) + len(test) - 1, dynamic=False)
+pred_mean = predictions.predicted_mean
+pred_conf = predictions.conf_int()
+
+# In[139]:
+
+plt.figure(figsize=(12, 6))
+plt.plot(train.index, train, label='Training Data')
+plt.plot(test.index, test, label='Actual Prices')
+plt.plot(y_pred_out, color='Yellow', label = 'ARIMA Predictions')
+plt.legend()
+
+# In[143]:
+
+# Optionally, you can visualize the results
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12, 6))
+plt.plot(train.index, train, label='Training Data')
+plt.plot(test.index, test, label='Actual Prices')
+plt.plot(test.index, pred_mean, label='Predicted Prices', color='red')
+plt.fill_between(test.index, pred_conf.iloc[:, 0], pred_conf.iloc[:, 1], color='pink', alpha=0.3)
+plt.legend()
+plt.show()
+
+# In[141]:
+
+# Plot residuals
+residuals = test.values - pred_mean.values
+plt.figure(figsize=(10, 6))
+plt.plot(residuals)
+plt.title('Residuals')
+plt.show()
+
+# In[144]:
+
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+# Calculate errors
+mae = mean_absolute_error(test.values, pred_mean.values)
+mse = mean_squared_error(test.values, pred_mean.values)
+rmse = np.sqrt(mse)
+mape = np.mean(np.abs((test.values - pred_mean.values) / test.values)) * 100
+
+# Print results
+print(f'Mean Absolute Error (MAE): {mae}')
+print(f'Mean Squared Error (MSE): {mse}')
+print(f'Root Mean Squared Error (RMSE): {rmse}')
+print(f'Mean Absolute Percentage Error (MAPE): {mape}')
+
+
+
